@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>akuthedev — 3D City Portfolio (Prototype)</title>
+  <style>
+    :root{--bg:#071027;--panel:#0f1724;--accent:#ff6b6b}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,Helvetica;background:linear-gradient(180deg,#bfe9ff 0%, #76c7ff 40%, #071027 100%);color:#e6eef8}
+    #app{height:100vh;position:relative;overflow:hidden}
+    canvas{display:block}
+    .hud{position:absolute;left:14px;top:14px;backdrop-filter:blur(6px);background:rgba(5,10,20,0.45);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);min-width:300px;z-index:10}
+    .hud h1{margin:0;font-size:16px}
+    .hud p{margin:6px 0 0 0;color:#9fb7d9;font-size:13px}
+    .controls{position:absolute;right:14px;top:14px;background:rgba(5,10,20,0.35);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);font-size:13px;z-index:10}
+    .panel{position:absolute;right:14px;bottom:14px;background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);min-width:260px;z-index:10}
+    .links{display:flex;gap:8px;flex-wrap:wrap}
+    .links button{background:var(--panel);padding:6px 8px;border-radius:8px;border:none;color:#dcecff;font-size:13px}
+    footer{position:absolute;left:14px;bottom:14px;color:#91a0b6;font-size:13px;z-index:10}
+    .tog{margin-top:8px}
+    .hint{color:#9fb7d9;font-size:12px;margin-top:6px}
+    .joystick{position:fixed;left:12px;bottom:12px;width:120px;height:120px;border-radius:50%;background:rgba(10,16,28,0.35);display:none;align-items:center;justify-content:center;z-index:20}
+    .joy-knob{width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,0.06);transform:translate(0,0);touch-action:none}
+    @media (max-width:720px){.panel{display:none}.joystick{display:flex}}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="hud">
+      <h1>akuthedev — meme token web developer</h1>
+      <p>Drive the car with <b>W/A/S/D</b> or <b>arrow keys</b>. <b>Shift</b> to boost. Park & press <b>Enter</b> to open project links.</p>
+      <div style="margin-top:8px;font-size:13px;color:#9fb7d9">Speed: <span id="speed">0</span> m/s — Nearest: <span id="nearest">—</span></div>
+      <div class="hint">Tip: use the Day/Night toggle to see lighting changes.</div>
+    </div>
+
+    <div class="controls">
+      <div style="font-size:13px;margin-bottom:8px"><b>Sections</b></div>
+      <div class="links">
+        <button id="jump-about">About</button>
+        <button id="jump-jobs">Past Jobs</button>
+        <button id="jump-contact">Contact</button>
+      </div>
+      <div class="tog">
+        <label style="font-size:13px;color:#9fb7d9">Theme: </label>
+        <button id="toggleDay">Day</button>
+        <button id="toggleNight">Night</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="font-size:13px;color:#9fb7d9">Random demo links are used. Replace in the script when ready.</div>
+      <div style="margin-top:8px;font-size:12px;color:#9fb7d9">Performance: lower model quality if you see slowdowns.</div>
+    </div>
+
+    <div class="joystick" id="joystick"><div class="joy-knob" id="joyKnob"></div></div>
+
+    <footer>Prototype — Three.js — walkable city demo for akuthedev</footer>
+  </div>
+
+  <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://unpkg.com/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
+  <script>
+  (function(){
+    // Scene, camera, renderer
+    const container = document.getElementById('app');
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0,6,14);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    // Lighting (physically plausible)
+    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xfff1d6, 0.9);
+    sun.position.set(30, 60, 10); sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048; sun.shadow.mapSize.height = 2048;
+    sun.shadow.camera.near = 1; sun.shadow.camera.far = 200;
+    scene.add(sun);
+
+    // Ground (road + sidewalk)
+    const groundMat = new THREE.MeshStandardMaterial({ color:0x2b2b2b, roughness:0.9 });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(400,400), groundMat);
+    ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+
+    // Road markings (simple stripes)
+    function addRoad(y){
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(60, 12), new THREE.MeshStandardMaterial({ color: 0x202020 }));
+      road.rotation.x = -Math.PI/2; road.position.set(0, 0.01, y); scene.add(road);
+      // center lines
+      const stripeGeo = new THREE.PlaneGeometry(1, 0.6);
+      for(let i=-28;i<28;i+=3){ const s = new THREE.Mesh(stripeGeo, new THREE.MeshStandardMaterial({ color:0xfff2c7 })); s.rotation.x=-Math.PI/2; s.position.set(i,0.02,y); scene.add(s);}    }
+    addRoad(-6); addRoad(10);
+
+    // Sidewalks
+    const sidewalk = new THREE.Mesh(new THREE.PlaneGeometry(400,8), new THREE.MeshStandardMaterial({ color:0xbfc7c9 })); sidewalk.rotation.x=-Math.PI/2; sidewalk.position.set(0,0.02,-12); scene.add(sidewalk);
+    const sidewalk2 = sidewalk.clone(); sidewalk2.position.set(0,0.02,18); scene.add(sidewalk2);
+
+    // Simple city block buildings (procedural low-poly)
+    const buildings = new THREE.Group();
+    const buildingColors = [0x8fb3ff,0xffd3a5,0xc3f2c4,0xfcc8d1,0xdfe6ff,0xfff1a8];
+    for(let bx=-3; bx<=3; bx++){
+      for(let bz=0; bz<6; bz++){
+        const w = 6 + Math.random()*8; const h = 6 + Math.random()*30; const d = 6 + Math.random()*8;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({ color: buildingColors[Math.floor(Math.random()*buildingColors.length)], roughness:0.9 }));
+        b.position.set(bx*14 + (Math.random()-0.5)*3, h/2, 36 + bz*12 + (Math.random()-0.5)*4);
+        b.castShadow = true; b.receiveShadow = true; buildings.add(b);
+
+        // add simple window texture using canvas for a few buildings
+        if(Math.random()<0.6){ const cvs=document.createElement('canvas'); cvs.width=512; cvs.height=512; const ctx=cvs.getContext('2d'); ctx.fillStyle='#0b1220'; ctx.fillRect(0,0,512,512); ctx.fillStyle='#fff'; for(let y=24;y<488;y+=36){ for(let x=24;x<488;x+=36){ if(Math.random()<0.7) ctx.fillRect(x,y,20,24); }} const tex=new THREE.CanvasTexture(cvs); b.material.map = tex; b.material.needsUpdate = true; }
+      }
+    }
+    scene.add(buildings);
+
+    // Parked and moving cars (low-poly)
+    const npcCars = [];
+    function makeCar(x,z,color=0xff6b6b){ const g=new THREE.Group(); const body=new THREE.Mesh(new THREE.BoxGeometry(2,0.6,4), new THREE.MeshStandardMaterial({ color })); body.position.y=0.5; g.add(body); g.position.set(x,0,z); scene.add(g); npcCars.push(g); }
+    makeCar(-10,-6,0xff6b6b); makeCar(0,-6,0x6bff9b); makeCar(12,-6,0x6bb0ff);
+    // moving cars along road lanes
+    const traffic = [];
+    function spawnTraffic(){ for(let i=0;i<6;i++){ const car=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.5,3), new THREE.MeshStandardMaterial({ color: Math.random()*0xffffff })); car.position.set(-30 + Math.random()*60,0.5,10 + (Math.random()-0.5)*1.2); car.userData.speed = 2 + Math.random()*2; scene.add(car); traffic.push(car);} }
+    spawnTraffic();
+
+    // Simple pedestrians (cylinders) with basic step animation
+    const pedestrians = [];
+    function spawnPedestrians(){ for(let i=0;i<12;i++){ const p=new THREE.Group(); const body=new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.35,1.4,8), new THREE.MeshStandardMaterial({ color:0xead2b3 })); body.position.y=0.7; p.add(body); p.position.set(-30 + Math.random()*60,0, -22 + Math.random()*8); scene.add(p); pedestrians.push({g:p,dir:Math.random()<0.5?1:-1,speed:0.6+Math.random()*0.6}); }}
+    spawnPedestrians();
+
+    // Traffic lights (state machine)
+    const trafficLights = [];
+    function makeTrafficLight(x,z){ const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,4), new THREE.MeshStandardMaterial({color:0x222222})); pole.position.set(x,2,z); scene.add(pole); const box=new THREE.Mesh(new THREE.BoxGeometry(0.6,1.4,0.5), new THREE.MeshStandardMaterial({color:0x111111})); box.position.set(x,2.2,z-0.4); scene.add(box);
+      const r=new THREE.Mesh(new THREE.CircleGeometry(0.12,16), new THREE.MeshBasicMaterial({color:0x220000})); r.position.set(x,2.6,z-0.15); scene.add(r);
+      const y=new THREE.Mesh(new THREE.CircleGeometry(0.1,16), new THREE.MeshBasicMaterial({color:0x222200})); y.position.set(x,2.2,z-0.15); scene.add(y);
+      const g=new THREE.Mesh(new THREE.CircleGeometry(0.12,16), new THREE.MeshBasicMaterial({color:0x002200})); g.position.set(x,1.8,z-0.15); scene.add(g);
+      trafficLights.push({r,y,g,phase:0,timer:0}); }
+    makeTrafficLight(-6,2); makeTrafficLight(18,2);
+
+    // Billboards & parking spots (clickable portfolio links)
+    const jobPositions = [];
+    const demoLinks = [ 'https://example.com', 'https://openai.com', 'https://github.com', 'https://wikipedia.org', 'https://twitter.com' ];
+    function makeBillboard(title,x,z){
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.2,4.5,0.2), new THREE.MeshStandardMaterial({color:0x253444})); post.position.set(x,2,z-1.2); scene.add(post);
+      const cvs = document.createElement('canvas'); cvs.width=1024; cvs.height=512; const ctx=cvs.getContext('2d'); ctx.fillStyle='#071027'; ctx.fillRect(0,0,1024,512); ctx.fillStyle='#fff'; ctx.font='64px sans-serif'; ctx.fillText(title,40,140); ctx.fillStyle='#9fb7d9'; ctx.font='28px sans-serif'; ctx.fillText('Meme token landing page',40,220); ctx.fillStyle='#dfefff'; ctx.font='20px monospace'; ctx.fillText('Park & press Enter to open',40,320);
+      const tex = new THREE.CanvasTexture(cvs);
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(6,3), new THREE.MeshStandardMaterial({ map:tex })); board.position.set(x,2.1,z); scene.add(board);
+      const spot = new THREE.Mesh(new THREE.PlaneGeometry(3.2,5), new THREE.MeshStandardMaterial({ color: 0x163245, side:THREE.DoubleSide })); spot.rotation.x=-Math.PI/2; spot.position.set(x,0.02,z+4); scene.add(spot);
+      jobPositions.push({name:title,parkCenter:new THREE.Vector3(x,0,z+4),link:demoLinks[Math.floor(Math.random()*demoLinks.length)]}); }
+    makeBillboard('Site Sample 1', -18, -18); makeBillboard('Site Sample 2', -4, -18); makeBillboard('Site Sample 3', 10, -18); makeBillboard('Site Sample 4', 24, -18);
+
+    // Main player car (placeholder + model loader)
+    const carGroup = new THREE.Group();
+    const placeholder = new THREE.Mesh(new THREE.BoxGeometry(2,0.6,4), new THREE.MeshStandardMaterial({ color:0xff6b6b })); placeholder.position.y=0.5; placeholder.castShadow=true; carGroup.add(placeholder);
+    carGroup.position.set(0,0,0); scene.add(carGroup);
+
+    // Try load nicer car model (non-blocking)
+    if(THREE.GLTFLoader){ const loader = new THREE.GLTFLoader(); loader.load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Car/glTF/Car.gltf', (g)=>{ const m = g.scene; m.scale.set(0.6,0.6,0.6); m.rotation.y = Math.PI; m.traverse(n=>{ if(n.isMesh){ n.castShadow=true; } }); placeholder.visible = false; carGroup.add(m); }, undefined, ()=>{ console.warn('Car model failed to load — using placeholder car.'); }); }
+
+    // Camera follow offset
+    const camOffset = new THREE.Vector3(0,6,14);
+
+    // Movement / physics
+    let velocity = new THREE.Vector3(0,0,0);
+    const keys = {};
+    window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()] = true; if(e.key==='Enter') tryOpenNearest(); if(e.key===' ') e.preventDefault(); });
+    window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+
+    function tryOpenNearest(){ const near = findNearestPark(); if(!near) return; const dist = carGroup.position.distanceTo(near.parkCenter); if(dist < 2.6){ window.open(near.link,'_blank'); playBeep(700,0.08);} else alert('Drive closer to the parking space to enter the site.'); }
+    function findNearestPark(){ let best=null, bd=Infinity; for(const j of jobPositions){ const d = carGroup.position.distanceTo(j.parkCenter); if(d<bd){ bd=d; best=j; } } document.getElementById('nearest').textContent = best ? (best.name + ' ('+bd.toFixed(1)+' m)') : '—'; return best; }
+
+    // Teleport buttons
+    document.getElementById('jump-about').addEventListener('click', ()=>{ teleportCarTo(new THREE.Vector3(28,0,-6)); });
+    document.getElementById('jump-jobs').addEventListener('click', ()=>{ teleportCarTo(new THREE.Vector3(-12,0,-12)); });
+    document.getElementById('jump-contact').addEventListener('click', ()=>{ teleportCarTo(new THREE.Vector3(28,0,10)); });
+    function teleportCarTo(pos){ carGroup.position.copy(pos); velocity.set(0,0,0); carGroup.rotation.y = Math.PI; }
+
+    // Audio (engine + beep) simple
+    let audioCtx, engineOsc, engineGain;
+    function ensureAudio(){ if(audioCtx) return; try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain(); engineOsc.type = 'sawtooth'; engineOsc.frequency.value = 90; engineGain.gain.value = 0; engineOsc.connect(engineGain); engineGain.connect(audioCtx.destination); engineOsc.start(); }catch(e){ console.warn('Audio not available', e); } }
+    function updateEngineSound(level){ if(!audioCtx) return; engineGain.gain.linearRampToValueAtTime(Math.min(0.24, level), audioCtx.currentTime + 0.05); engineOsc.frequency.linearRampToValueAtTime(80 + level*220, audioCtx.currentTime + 0.05); }
+    function playBeep(freq=800, dur=0.12){ try{ ensureAudio(); const o=audioCtx.createOscillator(); const g=audioCtx.createGain(); o.type='sine'; o.frequency.value=freq; g.gain.value=0.0001; o.connect(g); g.connect(audioCtx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur); o.stop(audioCtx.currentTime + dur + 0.02); }catch(e){} }
+    window.addEventListener('pointerdown', ()=>{ ensureAudio(); }, { once:true }); window.addEventListener('keydown', ()=>{ ensureAudio(); }, { once:true });
+
+    // Mobile joystick
+    const joy = document.getElementById('joystick'); const knob = document.getElementById('joyKnob'); let active=false, baseX=0, baseY=0;
+    function setKeysFromJoy(x,y){ keys['w'] = y < -0.35; keys['s'] = y > 0.35; keys['a'] = x < -0.35; keys['d'] = x > 0.35; knob.style.transform = `translate(${x*36}px, ${y*36}px)`; }
+    joy.addEventListener('touchstart', (e)=>{ const t=e.touches[0]; const rect=joy.getBoundingClientRect(); baseX = rect.left+rect.width/2; baseY = rect.top+rect.height/2; active=true; }, {passive:true});
+    joy.addEventListener('touchmove', (e)=>{ if(!active) return; const t=e.touches[0]; const dx=(t.clientX-baseX)/(joy.clientWidth/2); const dy=(t.clientY-baseY)/(joy.clientHeight/2); const nx=Math.max(-1,Math.min(1,dx)); const ny=Math.max(-1,Math.min(1,dy)); setKeysFromJoy(nx,ny); }, {passive:true});
+    joy.addEventListener('touchend', ()=>{ active=false; knob.style.transform='translate(0,0)'; keys['w']=keys['a']=keys['s']=keys['d']=false; });
+
+    // Day/Night toggle
+    document.getElementById('toggleDay').addEventListener('click', ()=>{ ambient.intensity=0.35; sun.intensity=0.9; document.body.style.background='linear-gradient(180deg,#bfe9ff 0%, #76c7ff 40%, #071027 100%)'; });
+    document.getElementById('toggleNight').addEventListener('click', ()=>{ ambient.intensity=0.12; sun.intensity=0.12; document.body.style.background='linear-gradient(180deg,#0b1220 0%, #021126 60%, #000012 100%)'; });
+
+    // Simple AI: move traffic forward and wrap around
+    function updateTraffic(dt){ for(const c of traffic){ c.position.x += c.userData.speed * dt * 2; if(c.position.x > 40) c.position.x = -40; } }
+    // Move pedestrians along small paths
+    function updatePedestrians(dt){ for(const p of pedestrians){ p.g.position.x += p.dir * p.speed * dt * 1.2; if(p.g.position.x > 32 || p.g.position.x < -32) p.dir *= -1; // simple turn
+        // bobbing animation
+        p.g.children[0].rotation.x = Math.sin(Date.now()*0.004 + p.g.position.x) * 0.15; } }
+
+    // traffic lights state machine
+    function updateTrafficLights(dt){ for(const tl of trafficLights){ tl.timer += dt; if(tl.phase===0 && tl.timer>4){ // green -> yellow
+          tl.r.material.color.set(0x220000); tl.y.material.color.set(0xffff00); tl.g.material.color.set(0x002200); tl.phase=1; tl.timer=0;
+        } else if(tl.phase===1 && tl.timer>1.2){ // yellow -> red
+          tl.r.material.color.set(0xff0000); tl.y.material.color.set(0x222200); tl.g.material.color.set(0x002200); tl.phase=2; tl.timer=0;
+        } else if(tl.phase===2 && tl.timer>4){ // red -> green
+          tl.r.material.color.set(0x220000); tl.y.material.color.set(0x222200); tl.g.material.color.set(0x00ff00); tl.phase=0; tl.timer=0;
+        } }
+    }
+
+    // Main animation loop
+    const clock = new THREE.Clock();
+    function animate(){ const dt = Math.min(0.05, clock.getDelta());
+      // input
+      let forwardInput=0; if(keys['w']||keys['arrowup']) forwardInput += 1; if(keys['s']||keys['arrowdown']) forwardInput -= 1;
+      let steerInput=0; if(keys['a']||keys['arrowleft']) steerInput += 1; if(keys['d']||keys['arrowright']) steerInput -= 1;
+      const boost = keys['shift'];
+      // steering
+      carGroup.rotation.y += steerInput * 2.2 * dt * Math.max(0.2, velocity.length());
+      // acceleration
+      const forwardVec = new THREE.Vector3(0,0,-1).applyQuaternion(carGroup.quaternion).normalize();
+      const accel = 20;
+      const a = forwardVec.multiplyScalar(forwardInput * accel * (boost?1.6:1) * dt);
+      velocity.add(a);
+      // friction
+      velocity.multiplyScalar(0.986);
+      carGroup.position.add(velocity.clone().multiplyScalar(dt*6));
+      carGroup.position.y = 0;
+      // camera follow
+      const desiredCam = carGroup.position.clone().add(camOffset.clone().applyQuaternion(carGroup.quaternion));
+      camera.position.lerp(desiredCam, 0.08);
+      camera.lookAt(carGroup.position.clone().add(new THREE.Vector3(0,1.6,0)));
+      // hud
+      document.getElementById('speed').textContent = (velocity.length()*6).toFixed(1);
+      findNearestPark();
+      // update world
+      updateTraffic(dt); updatePedestrians(dt); updateTrafficLights(dt);
+      // engine sound
+      try{ updateEngineSound(Math.min(0.24, velocity.length()*0.9)); }catch(e){}
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    // Responsive
+    window.addEventListener('resize', ()=>{ camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+
+    console.log('City prototype loaded. If remote models fail due to CORS, run via a local server or host assets on CORS-enabled storage.');
+  })();
+  </script>
+</body>
+</html>
